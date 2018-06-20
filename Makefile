@@ -1,0 +1,7 @@
+KERNEL_MODULE_NAME := DVBCIUSB
+KERNEL_MODULE_OBJECT_FILE_LIST := DVBCIKernelModule.o DVBCICommandInterface.o DVBCIMediaInterface.o
+
+obj-m := $(KERNEL_MODULE_NAME).o
+$(KERNEL_MODULE_NAME)-y += $(KERNEL_MODULE_OBJECT_FILE_LIST)
+# ccflags-y := -ggdb -O0
+
