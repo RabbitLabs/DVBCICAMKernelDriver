@@ -228,7 +228,7 @@ static ssize_t dvbciusb_command_read(struct file *file, char *buffer, size_t cou
 		goto exit;
 	}
 	
-	dev_info(dev->interface->usb_dev, "Request read of %ld bytes.\n", count);
+	dev_info(dev->interface->usb_dev, "Request read of %zd bytes.\n", count);
 
 	/* if IO is under way, we must not touch things */
 retry:
@@ -273,7 +273,7 @@ retry:
 	if (rv < 0)
 		goto exit;
 	
-	dev_info(dev->interface->usb_dev, "Event, received %ld bytes, ended with short packet %s\n", dev->bulk_in_filled, dev->bulk_in_short_packet ? "yes": "no");
+	dev_info(dev->interface->usb_dev, "Event, received %zd bytes, ended with short packet %s\n", dev->bulk_in_filled, dev->bulk_in_short_packet ? "yes": "no");
 	
 	if (dev->bulk_in_filled)
 	{
@@ -335,7 +335,7 @@ static ssize_t dvbciusb_command_write(struct file *file, const char *user_buffer
 
 	dev = file->private_data;
 
-	dev_info(dev->interface->usb_dev, "Request write of %ld bytes. write size if %ld\n", count, writesize);
+	dev_info(dev->interface->usb_dev, "Request write of %zd bytes. write size if %zd\n", count, writesize);
 	
 	/* verify that we actually have some data to write */
 	if (count == 0)
