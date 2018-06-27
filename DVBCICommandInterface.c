@@ -60,19 +60,38 @@ exit:
 static int dvbciusb_command_release(struct inode *inode, struct file *file)
 {
 	struct usbdvbci_interface *dev;
+	bool ongoing_io;
 
 	dev = file->private_data;
 	if (dev == NULL)
 		return -ENODEV;
 
+	dev_info(dev->interface->usb_dev, "request release\n");
+	
+	spin_lock_irq(&dev->err_lock);
+	ongoing_io = dev->ongoing_read;
+	spin_unlock_irq(&dev->err_lock);
+
+	// kill pending read if on going
+	if(ongoing_io)
+	{
+		dev_info(dev->interface->usb_dev, "kill pending I/O\n");
+		usb_unlink_urb(dev->bulk_in_urb);		
+	}	
+
 	/* allow the device to be autosuspended */
-	mutex_lock(&dev->io_mutex);
+	mutex_lock(&dev->io_write_mutex);
+	mutex_lock(&dev->io_read_mutex);
 	if (dev->interface)
 		usb_autopm_put_interface(dev->interface);
-	mutex_unlock(&dev->io_mutex);
-
+	mutex_unlock(&dev->io_read_mutex);
+	mutex_unlock(&dev->io_write_mutex);
+	
 	/* decrement the count on our device */
 	kref_put(&dev->kref, dvbciusb_delete);
+
+	dev_info(dev->interface->usb_dev, "release done\n");
+
 	return 0;
 }
 
@@ -80,13 +99,29 @@ static int dvbciusb_command_flush(struct file *file, fl_owner_t id)
 {
 	struct usbdvbci_interface *dev;
 	int res;
+	bool ongoing_io;
+
 
 	dev = file->private_data;
 	if (dev == NULL)
 		return -ENODEV;
 
+	dev_info(dev->interface->usb_dev, "request flush\n");
+	
+	spin_lock_irq(&dev->err_lock);
+	ongoing_io = dev->ongoing_read;
+	spin_unlock_irq(&dev->err_lock);
+
+	// kill pending read if on going
+	if(ongoing_io)
+	{
+		dev_info(dev->interface->usb_dev, "kill pending I/O\n");
+		usb_unlink_urb(dev->bulk_in_urb);		
+	}		
+	
 	/* wait for io to stop */
-	mutex_lock(&dev->io_mutex);
+	mutex_lock(&dev->io_write_mutex);
+	mutex_lock(&dev->io_read_mutex);
 	dvbciusb_draw_down(dev);
 
 	/* read out errors, leave subsequent opens a clean slate */
@@ -95,7 +130,8 @@ static int dvbciusb_command_flush(struct file *file, fl_owner_t id)
 	dev->errors = 0;
 	spin_unlock_irq(&dev->err_lock);
 
-	mutex_unlock(&dev->io_mutex);
+	mutex_unlock(&dev->io_read_mutex);
+	mutex_unlock(&dev->io_write_mutex);
 
 	return res;
 }
@@ -183,7 +219,7 @@ static ssize_t dvbciusb_command_read(struct file *file, char *buffer, size_t cou
 		return 0;
 
 	/* no concurrent readers */
-	rv = mutex_lock_interruptible(&dev->io_mutex);
+	rv = mutex_lock_interruptible(&dev->io_read_mutex);
 	if (rv < 0)
 		return rv;
 
@@ -257,7 +293,7 @@ retry:
 	rv = received_data;
 		
 exit:
-	mutex_unlock(&dev->io_mutex);
+	mutex_unlock(&dev->io_read_mutex);
 	return rv;
 }
 
@@ -299,9 +335,12 @@ static ssize_t dvbciusb_command_write(struct file *file, const char *user_buffer
 
 	dev = file->private_data;
 
+	dev_info(dev->interface->usb_dev, "Request write of %ld bytes. write size if %ld\n", count, writesize);
+	
 	/* verify that we actually have some data to write */
 	if (count == 0)
 		goto exit;
+
 
 	/*
 	 * limit the number of URBs in flight to stop a user from using up all
@@ -351,9 +390,9 @@ static ssize_t dvbciusb_command_write(struct file *file, const char *user_buffer
 	}
 
 	/* this lock makes sure we don't submit URBs to gone devices */
-	mutex_lock(&dev->io_mutex);
+	mutex_lock(&dev->io_write_mutex);
 	if (!dev->interface) {		/* disconnect() was called */
-		mutex_unlock(&dev->io_mutex);
+		mutex_unlock(&dev->io_write_mutex);
 		retval = -ENODEV;
 		goto error;
 	}
@@ -370,7 +409,7 @@ static ssize_t dvbciusb_command_write(struct file *file, const char *user_buffer
 
 	/* send the data out the bulk port */
 	retval = usb_submit_urb(urb, GFP_KERNEL);
-	mutex_unlock(&dev->io_mutex);
+	mutex_unlock(&dev->io_write_mutex);
 	if (retval) {
 		dev_err(&dev->interface->dev,
 			"%s - failed submitting write urb, error %d\n",

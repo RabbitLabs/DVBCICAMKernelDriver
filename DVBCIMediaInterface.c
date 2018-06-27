@@ -66,10 +66,12 @@ static int dvbciusb_media_release(struct inode *inode, struct file *file)
 		return -ENODEV;
 
 	/* allow the device to be autosuspended */
-	mutex_lock(&dev->io_mutex);
+	mutex_lock(&dev->io_read_mutex);
+	mutex_lock(&dev->io_write_mutex);
 	if (dev->interface)
 		usb_autopm_put_interface(dev->interface);
-	mutex_unlock(&dev->io_mutex);
+	mutex_unlock(&dev->io_read_mutex);
+	mutex_unlock(&dev->io_write_mutex);
 
 	/* decrement the count on our device */
 	kref_put(&dev->kref, dvbciusb_delete);
@@ -86,7 +88,8 @@ static int dvbciusb_media_flush(struct file *file, fl_owner_t id)
 		return -ENODEV;
 
 	/* wait for io to stop */
-	mutex_lock(&dev->io_mutex);
+	mutex_lock(&dev->io_read_mutex);
+	mutex_lock(&dev->io_write_mutex);
 	dvbciusb_draw_down(dev);
 
 	/* read out errors, leave subsequent opens a clean slate */
@@ -95,7 +98,8 @@ static int dvbciusb_media_flush(struct file *file, fl_owner_t id)
 	dev->errors = 0;
 	spin_unlock_irq(&dev->err_lock);
 
-	mutex_unlock(&dev->io_mutex);
+	mutex_unlock(&dev->io_read_mutex);
+	mutex_unlock(&dev->io_write_mutex);
 
 	return res;
 }
@@ -185,7 +189,7 @@ static ssize_t dvbciusb_media_read(struct file *file,
 		return 0;
 
 	/* no concurrent readers */
-	rv = mutex_lock_interruptible(&dev->io_mutex);
+	rv = mutex_lock_interruptible(&dev->io_read_mutex);
 	if (rv < 0)
 		return rv;
 
@@ -259,7 +263,7 @@ retry:
 	rv = received_data;
 		
 exit:
-	mutex_unlock(&dev->io_mutex);
+	mutex_unlock(&dev->io_read_mutex);
 	return rv;
 }
 
@@ -355,9 +359,9 @@ static ssize_t dvbciusb_media_write(struct file *file,
 	}
 
 	/* this lock makes sure we don't submit URBs to gone devices */
-	mutex_lock(&dev->io_mutex);
+	mutex_lock(&dev->io_write_mutex);
 	if (!dev->interface) {		/* disconnect() was called */
-		mutex_unlock(&dev->io_mutex);
+		mutex_unlock(&dev->io_write_mutex);
 		retval = -ENODEV;
 		goto error;
 	}
@@ -374,7 +378,7 @@ static ssize_t dvbciusb_media_write(struct file *file,
 
 	/* send the data out the bulk port */
 	retval = usb_submit_urb(urb, GFP_KERNEL);
-	mutex_unlock(&dev->io_mutex);
+	mutex_unlock(&dev->io_write_mutex);
 	if (retval) {
 		dev_err(&dev->interface->dev,
 			"%s - failed submitting write urb, error %d\n",

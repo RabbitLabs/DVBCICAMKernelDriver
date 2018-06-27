@@ -53,7 +53,8 @@ static int dvbciusb_probe(struct usb_interface *interface,
 	}
 	kref_init(&dev->kref);
 	sema_init(&dev->limit_sem, WRITES_IN_FLIGHT);
-	mutex_init(&dev->io_mutex);
+	mutex_init(&dev->io_read_mutex);
+	mutex_init(&dev->io_write_mutex);
 	spin_lock_init(&dev->err_lock);
 	init_usb_anchor(&dev->submitted);
 	init_waitqueue_head(&dev->bulk_in_wait);
@@ -141,18 +142,35 @@ static void dvbciusb_disconnect(struct usb_interface *interface)
 {
 	struct usbdvbci_interface *dev;
 	int minor = interface->minor;
-
+	bool ongoing_io;
+	
+	dev_info(&interface->dev, "USB DVB CI #%d disconnect request", minor);
+	
 	dev = usb_get_intfdata(interface);
 	usb_set_intfdata(interface, NULL);
 
 	/* give back our minor */
 	usb_deregister_dev(interface, &dvbciusb_command_class);
+	
+	spin_lock_irq(&dev->err_lock);
+	ongoing_io = dev->ongoing_read;
+	spin_unlock_irq(&dev->err_lock);
 
+	// kill pending read if on going
+	if (ongoing_io)
+	{
+		dev_info(&interface->dev, "USB DVB CI #%d stop pending I/O", minor);
+		usb_unlink_urb(dev->bulk_in_urb);		
+	}
+	
 	/* prevent more I/O from starting */
-	mutex_lock(&dev->io_mutex);
+	mutex_lock(&dev->io_write_mutex);
+	mutex_lock(&dev->io_read_mutex);
 	dev->interface = NULL;
-	mutex_unlock(&dev->io_mutex);
+	mutex_unlock(&dev->io_read_mutex);
+	mutex_unlock(&dev->io_write_mutex);
 
+	// kill pending writes
 	usb_kill_anchored_urbs(&dev->submitted);
 
 	/* decrement our usage count */
@@ -190,7 +208,8 @@ static int dvbciusb_pre_reset(struct usb_interface *intf)
 {
 	struct usbdvbci_interface *dev = usb_get_intfdata(intf);
 
-	mutex_lock(&dev->io_mutex);
+	mutex_lock(&dev->io_write_mutex);
+	mutex_lock(&dev->io_read_mutex);
 	dvbciusb_draw_down(dev);
 
 	return 0;
@@ -202,7 +221,8 @@ static int dvbciusb_post_reset(struct usb_interface *intf)
 
 	/* we are sure no URBs are active - no locking needed */
 	dev->errors = -EPIPE;
-	mutex_unlock(&dev->io_mutex);
+	mutex_unlock(&dev->io_read_mutex);
+	mutex_unlock(&dev->io_write_mutex);
 
 	return 0;
 }

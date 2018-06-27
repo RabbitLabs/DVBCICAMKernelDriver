@@ -59,7 +59,8 @@ struct usbdvbci_interface {
   bool			ongoing_read;		/* a read is going on */
   spinlock_t		err_lock;		/* lock for errors */
   struct kref		kref;
-  struct mutex		io_mutex;		/* synchronize I/O with disconnect */
+  struct mutex		io_read_mutex;		/* synchronize I/O with disconnect */
+  struct mutex		io_write_mutex;		/* synchronize I/O with disconnect */
   wait_queue_head_t	bulk_in_wait;		/* to wait for an ongoing read */
 };
 
