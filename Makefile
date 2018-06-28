@@ -2,7 +2,7 @@
 #Use VisualKernel Project Properties to edit.
 
 # Get kernel version
-CURRENT = $(uname -r)
+CURRENT = $(shell uname -r)
 
 ifndef KERNELDIR
 	KERNELDIR = /lib/modules/$(CURRENT)/build
@@ -25,10 +25,8 @@ clean:
 INSTALL_CMD := "/sbin/rmmod $(KERNEL_MODULE_NAME) 2>/dev/null || true &&     \
 				install -d $(INSTALLDIR) &&     \
 	            cp -v $(KERNEL_MODULE_NAME).ko $(INSTALLDIR) && \
+				install -o root -g root -m 644 10-ciusb.rules /etc/udev/rules.d && \
 			    /sbin/depmod -a && \
 			    /sbin/modprobe $(KERNEL_MODULE_NAME)"
-
-# 			   install -o root -g root -m 644 $(UDEV_FILE) /etc/udev/rules.d/51-cisub.rules" && \
-
 install:
 	su -c $(INSTALL_CMD)
